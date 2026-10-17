@@ -1,0 +1,6 @@
+tunnel: 3614d4ed-50f9-4a27-b70a-144d5dcba6b5
+credentials-file: /etc/cloudflared/credentials.json
+ingress:
+  - hostname: lap.aoltech.co
+    service: http://lap-web:4000
+  - service: http_status:404

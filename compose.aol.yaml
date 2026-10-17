@@ -1,0 +1,40 @@
+# Override da AOL Tech: docker compose -f compose.yaml -f compose.aol.yaml up -d
+# - UI/API em 127.0.0.1:4300 (a 4000 do host fica livre; na aol-net o LiteLLM é litellm:4000)
+# - config.yaml local montado (modelos via aol-ops), segredos no .env (não versionados)
+# - rede aol-net para alcançar o LiteLLM do aol-ops e o túnel cloudflared
+services:
+  lap:
+    ports: !override
+      - "127.0.0.1:4300:4000"
+    env_file: .env
+    environment:
+      LITELLM_CONFIG: /app/config.yaml
+      DATABASE_URL: postgres://lap:lap@lap-postgres:5432/litellm_agents
+      LAP_PUBLIC_URL: ${LAP_PUBLIC_URL:-https://lap.aoltech.co}
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+    networks:
+      aol-net: {aliases: [lap-web]}
+    mem_limit: 1g
+    restart: unless-stopped
+  postgres:
+    # só na aol-net: o Docker Desktop está sem pool de endereços para redes novas
+    networks:
+      aol-net: {aliases: [lap-postgres]}
+    mem_limit: 512m
+    restart: unless-stopped
+
+  # lap.aoltech.co → lap:4000 (túnel nomeado na conta Cloudflare da AOL Tech; credencial não versionada)
+  tunnel:
+    image: cloudflare/cloudflared:2025.8.1
+    command: tunnel --no-autoupdate --config /etc/cloudflared/config.yml run
+    volumes:
+      - ./aol/tunnel:/etc/cloudflared:ro
+    depends_on: [lap]
+    networks: [aol-net]
+    restart: unless-stopped
+    mem_limit: 128m
+
+networks:
+  aol-net:
+    external: true
