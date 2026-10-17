@@ -1,0 +1,28 @@
+# Config local da AOL Tech (não versionado — ver aol/README.md).
+# Modelos: tudo via o LiteLLM do aol-ops (OpenRouter pré-pago), na rota Anthropic /v1/messages,
+# com a virtual key `lap` (US$3/30d). O LAP nunca vê chaves de provedor.
+model_list:
+  - model_name: haiku-5.5
+    litellm_params:
+      model: anthropic/haiku-5.5
+      api_base: http://litellm:4000
+      api_key: os.environ/AOL_LITELLM_KEY
+  - model_name: gpt-6-luna
+    litellm_params:
+      model: anthropic/gpt-6-luna
+      api_base: http://litellm:4000
+      api_key: os.environ/AOL_LITELLM_KEY
+  - model_name: gemini-3.8-flash
+    litellm_params:
+      model: anthropic/gemini-3.8-flash
+      api_base: http://litellm:4000
+      api_key: os.environ/AOL_LITELLM_KEY
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  database_url: os.environ/DATABASE_URL
+  public_base_url: os.environ/LAP_PUBLIC_URL
+  store_prompts_in_spend_logs: true
+
+slack:
+  api_base_url: https://slack.com/api
