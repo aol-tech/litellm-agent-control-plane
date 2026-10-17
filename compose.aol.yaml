@@ -24,6 +24,47 @@ services:
     mem_limit: 512m
     restart: unless-stopped
 
+  # runtime Hermes (motor dos agentes): os modelos voltam pelo LAP → aol-ops, então custo e traces ficam lá.
+  # Busca web gratuita via DuckDuckGo (ddgs, sem chave).
+  hermes:
+    build:
+      context: ./templates/hermes
+      # imagem oficial do Hermes (a mesma do hermes-lab): o template do LAP faz `pip install .` do
+      # hermes-agent, que o upstream passou a recusar ("Building wheels … not supported")
+      dockerfile_inline: |
+        FROM nousresearch/hermes-agent:v2026.9.24
+        USER root
+        RUN uv pip install --python /opt/hermes/.venv/bin/python "ddgs==9.16.0"
+        WORKDIR /app
+        COPY src ./src
+        RUN mkdir -p /data /tmp/hermes-workspace
+        ENV PORT=8080 DB_PATH=/data/agents.db HERMES_HOME_ROOT=/data/hermes-home \
+            HERMES_WORKDIR=/tmp/hermes-workspace HERMES_COMMAND=/opt/hermes/.venv/bin/hermes
+        EXPOSE 8080
+        ENTRYPOINT []
+        CMD ["sh", "-c", "python -m uvicorn src.server:app --host 0.0.0.0 --port 8080"]
+    image: lap-hermes-aol
+    environment:
+      DEFAULT_MODEL: haiku-5.5
+      RUNTIME_API_KEY: ${HERMES_RUNTIME_API_KEY}
+      LAP_BASE_URL: http://lap-web:4000
+      LAP_API_KEY: ${LITELLM_MASTER_KEY}
+      HERMES_TOOLSETS: web,terminal
+      HERMES_MAX_TURNS: "12"
+    networks:
+      aol-net: {aliases: [lap-hermes]}
+    mem_limit: 1g
+    restart: unless-stopped
+  register-hermes:
+    environment:
+      LAP_URL: http://lap-web:4000
+      LAP_MASTER_KEY: ${LITELLM_MASTER_KEY}
+      RUNTIME_ALIAS: aol-hermes
+      RUNTIME_API_SPEC: claude_managed_agents
+      RUNTIME_API_BASE: http://lap-hermes:8080
+      RUNTIME_API_KEY: ${HERMES_RUNTIME_API_KEY}
+    networks: [aol-net]
+
   # lap.aoltech.co → lap:4000 (túnel nomeado na conta Cloudflare da AOL Tech; credencial não versionada)
   tunnel:
     image: cloudflare/cloudflared:2025.8.1
