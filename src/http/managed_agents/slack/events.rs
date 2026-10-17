@@ -11,7 +11,7 @@ use tracing::warn;
 
 use crate::{
     db::managed_agents::registry::schema::ManagedAgentRow, db::managed_agents::slack,
-    errors::GatewayError, http::sessions::create_runtime_session_for_agent, proxy::state::AppState,
+    errors::GatewayError, http::sessions::create_runtime_session_for_agent_without_prompt, proxy::state::AppState,
 };
 
 use super::{
@@ -85,13 +85,14 @@ async fn handle_event_callback(
         }
         false => {
             let prompt = session_prompt(&message);
-            let session_id = create_runtime_session_for_agent(
+            // Sem prompt inicial: o texto vai uma vez só, por spawn_slack_prompt (como Teams/Google Chat).
+            // Criar a sessão com o prompt e depois enfileirar de novo fazia o agente responder 2 vezes.
+            let session_id = create_runtime_session_for_agent_without_prompt(
                 state.clone(),
                 &pool,
                 agent.id.clone(),
                 agent_runtime(&agent),
                 format!("Slack {} {}", message.channel, message.thread_ts),
-                prompt.clone(),
                 serde_json::json!({
                     "source": "slack",
                     "channel_id": message.channel,
