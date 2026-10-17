@@ -155,7 +155,7 @@ def render_finding_comment(f: dict[str, Any], emoji: str) -> str:
 
         {f['detail']}
 
-        **Recommendation:** {f['recommendation']}"""
+        **Recomendação:** {f['recommendation']}"""
     )
     suggestion = f.get("suggestion")
     if suggestion:
