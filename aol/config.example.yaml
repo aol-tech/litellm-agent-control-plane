@@ -26,3 +26,7 @@ general_settings:
 
 slack:
   api_base_url: https://slack.com/api
+
+# MCPs da plataforma (subagentes, memória, Slack) chamados pelos runtimes na aol-net, sem sair pelo túnel.
+mcp_servers:
+  proxy_base_url: http://lap-web:4000

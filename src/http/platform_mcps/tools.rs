@@ -174,6 +174,14 @@ async fn collect_sub_agent_output(
         .await
         .map_err(|_| GatewayError::SandboxError("sub-agent run timed out".to_owned()))?;
     let status = status?;
+    // O runtime OpenCode às vezes emite o idle antes das mensagens: o stream fecha sem texto e o
+    // pai recebia output vazio. Nesse caso, lê as mensagens já gravadas na sessão do subagente.
+    if text.trim().is_empty() {
+        match crate::http::sessions::runtime_agent_message_text(state, pool, session_id).await {
+            Ok(stored) => text = stored,
+            Err(error) => tracing::warn!("sub-agent output fallback failed: {error}"),
+        }
+    }
     Ok(SubAgentOutput { status, text })
 }
 

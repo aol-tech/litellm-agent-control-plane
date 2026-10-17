@@ -77,6 +77,9 @@ services:
       LITELLM_PROVIDER_ID: openai
       LITELLM_MODELS: gemini-3.8-flash,haiku-5.5,gpt-6-luna
       LITELLM_DEFAULT_MODEL: openai/gemini-3.8-flash
+      # chave para os MCPs da plataforma (o opencode lê via {env:LAP_API_KEY}; não vai para o opencode.json)
+      LAP_BASE_URL: http://lap-web:4000
+      LAP_API_KEY: ${LITELLM_MASTER_KEY}
     volumes:
       - opencode-data:/data
       - opencode-workspace:/tmp/opencode-workspace
@@ -84,6 +87,44 @@ services:
       aol-net: {aliases: [lap-opencode]}
     mem_limit: 1536m
     restart: unless-stopped
+  # 2º OpenCode, só para os especialistas: o runtime recarrega o processo a cada sessão nova (para regravar os
+  # MCPs), e um subagente no MESMO container derrubava a conversa do Orquestrador que o chamou.
+  opencode-workers:
+    profiles: ["opencode"]
+    image: lap-opencode
+    environment:
+      LITELLM_BASE_URL: http://litellm:4000/v1
+      LITELLM_API_KEY: ${AOL_LITELLM_KEY}
+      LITELLM_PROVIDER_ID: openai
+      LITELLM_MODELS: gemini-3.8-flash,haiku-5.5,gpt-6-luna
+      LITELLM_DEFAULT_MODEL: openai/gemini-3.8-flash
+      LAP_BASE_URL: http://lap-web:4000
+      LAP_API_KEY: ${LITELLM_MASTER_KEY}
+    volumes:
+      - opencode-workers-data:/data
+      - opencode-workers-workspace:/tmp/opencode-workspace
+    networks:
+      aol-net: {aliases: [lap-opencode-workers]}
+    mem_limit: 1536m
+    restart: unless-stopped
+  register-opencode-workers:
+    profiles: ["opencode"]
+    image: curlimages/curl:8.11.1
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        until curl -fsS http://lap-web:4000/health >/dev/null; do sleep 1; done
+        until curl -fsS http://lap-opencode-workers:8080/health >/dev/null; do sleep 1; done
+        body='{"alias":"aol-opencode-workers","api_spec":"claude_managed_agents","api_base":"http://lap-opencode-workers:8080","api_key":"opencode-local"}'
+        curl -fsS -X POST http://lap-web:4000/api/runtime-harnesses -H "Authorization: Bearer $$LAP_MASTER_KEY" \
+          -H "Content-Type: application/json" -d "$$body" \
+        || curl -fsS -X PUT http://lap-web:4000/api/runtime-harnesses/aol-opencode-workers -H "Authorization: Bearer $$LAP_MASTER_KEY" \
+          -H "Content-Type: application/json" -d '{"api_base":"http://lap-opencode-workers:8080","api_key":"opencode-local"}'
+    environment:
+      LAP_MASTER_KEY: ${LITELLM_MASTER_KEY}
+    networks: [aol-net]
+    depends_on: [lap, opencode-workers]
   register-opencode:
     environment:
       LAP_URL: http://lap-web:4000
@@ -107,6 +148,8 @@ services:
 
 volumes:
   opencode-workspace:
+  opencode-workers-data:
+  opencode-workers-workspace:
 
 networks:
   aol-net:

@@ -210,24 +210,73 @@ export function writeMcpConfig(cwd, agents) {
   const mcp = {};
   // Preserve the server-level sandbox MCP (not an agent's own server) across rebuilds.
   if (obj.mcp?.sandbox) mcp.sandbox = obj.mcp.sandbox;
+  // Cada agente ganha seus próprios servidores (nome com sufixo do agente) e só ele enxerga as ferramentas
+  // deles: antes os MCPs de todos os agentes iam para uma config única e qualquer agente usava os de outro.
+  const tools = {};
+  const agentTools = {};
   for (const agent of agents || []) {
     for (const server of agent?.mcp_servers || []) {
       if (!server || !server.name || server.name === "sandbox") continue;
+      const name = mcpServerName(server.name, agent.id);
       if (server.command) {
-        mcp[server.name] = {
+        mcp[name] = {
           type: "local",
           command: [server.command, ...(server.args || [])],
           enabled: true,
         };
       } else if (server.url) {
-        mcp[server.name] = { type: "remote", url: server.url, enabled: true };
+        mcp[name] = { type: "remote", url: server.url, enabled: true, oauth: false, headers: mcpHeaders(server) };
+      } else {
+        continue;
       }
+      tools[`${name}*`] = false;
+      (agentTools[agent.id] ||= {})[`${name}*`] = true;
+      // Com o MCP da plataforma, delegar é run_sub_agent (agentes do LAP). O `task` nativo do opencode cria
+      // subagentes internos que travavam o turno e nunca devolviam: desligado para esses agentes.
+      if (server.name === "platform") agentTools[agent.id].task = false;
     }
+  }
+  obj.tools = { ...stripMcpToolGlobs(obj.tools), ...tools };
+  obj.agent = obj.agent || {};
+  for (const [id, cfg] of Object.entries(obj.agent)) {
+    if (cfg?.tools) { cfg.tools = stripMcpToolGlobs(cfg.tools); delete cfg.tools.task; }
+    if (cfg && !Object.keys(cfg.tools || {}).length) delete cfg.tools;
+    if (cfg && !Object.keys(cfg).length) delete obj.agent[id];
+  }
+  for (const [id, t] of Object.entries(agentTools)) {
+    obj.agent[id] = { ...(obj.agent[id] || {}), tools: { ...(obj.agent[id]?.tools || {}), ...t } };
   }
   obj.mcp = mcp;
   await mkdir(cwd, { recursive: true });
   await writeFile(configPath, JSON.stringify(obj, null, 2), "utf8");
   }); // end withJsonLock
+}
+
+// Nome do servidor MCP de um agente: único por agente, só [a-zA-Z0-9_-] (vira prefixo das ferramentas).
+export function mcpServerName(serverName, agentId) {
+  const clean = (v) => String(v || "").replace(/[^a-zA-Z0-9_-]/g, "_");
+  return `${clean(serverName)}__${clean(agentId).slice(-12)}`;
+}
+
+// MCPs remotos do LAP (ex.: o "platform", com subagentes, memória, Slack) exigem a chave do LAP. O valor
+// fica em env (LAP_API_KEY) e o opencode resolve {env:…}: a chave não é gravada no opencode.json.
+function mcpHeaders(server) {
+  const headers = { ...(server.headers || {}) };
+  const authToken = server.authorization_token || server.auth_token;
+  if (authToken) headers.Authorization = `Bearer ${authToken}`;
+  else if (!headers.Authorization && process.env.LAP_API_KEY && isLapUrl(server.url)) {
+    headers.Authorization = "Bearer {env:LAP_API_KEY}";
+  }
+  return headers;
+}
+
+function isLapUrl(url) {
+  const base = process.env.LAP_BASE_URL;
+  return Boolean(base && String(url || "").startsWith(base.replace(/\/$/, "")));
+}
+
+function stripMcpToolGlobs(tools) {
+  return Object.fromEntries(Object.entries(tools || {}).filter(([k]) => !/__[A-Za-z0-9_-]{1,12}\*$/.test(k)));
 }
 
 // Wire a sandbox-exec MCP server into opencode.json and DENY native bash/edit so

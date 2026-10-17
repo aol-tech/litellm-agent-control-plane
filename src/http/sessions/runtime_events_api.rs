@@ -202,6 +202,41 @@ pub(crate) async fn runtime_event_stream_for_session(
         .map_err(agent_sdk_error)
 }
 
+/// Texto das mensagens do agente já gravadas no runtime para a sessão (a lista completa, não o stream).
+/// Usado quando o stream fecha antes do texto chegar: alguns runtimes emitem o idle antes das mensagens.
+pub(crate) async fn runtime_agent_message_text(
+    state: &AppState,
+    pool: &PgPool,
+    session_id: &str,
+) -> Result<String, GatewayError> {
+    let row = session(pool, session_id).await?;
+    let runtime = row.runtime.as_deref().ok_or_else(|| {
+        GatewayError::InvalidConfig("session is not a runtime session".to_owned())
+    })?;
+    let resolved = crate::http::runtime_resolution::resolve_runtime(pool, state, runtime).await?;
+    let client = runtime_sdk_client(&resolved)?;
+    register_runtime_session(&client, pool, &row, &resolved).await?;
+    let events = client
+        .beta()
+        .sessions()
+        .events()
+        .list(&row.id)
+        .await
+        .map_err(agent_sdk_error)?;
+    let mut text = String::new();
+    for event in event_items(&events).into_iter().flatten() {
+        if event.get("type").and_then(Value::as_str) != Some("agent.message") {
+            continue;
+        }
+        for part in event.get("content").and_then(Value::as_array).into_iter().flatten() {
+            if let Some(chunk) = part.get("text").and_then(Value::as_str) {
+                text.push_str(chunk);
+            }
+        }
+    }
+    Ok(text)
+}
+
 fn require_events_master_key(
     headers: &HeaderMap,
     query: &HashMap<String, String>,
