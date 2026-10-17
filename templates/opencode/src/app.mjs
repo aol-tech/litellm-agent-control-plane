@@ -277,7 +277,18 @@ export function createApp({
       });
     }
     await writeMcpConfig(workdir, store.listAgents());
+    await waitForIdleTurns();
     await rebootOpencode();
+  }
+
+  // O opencode não recarrega config a quente: o reboot mata qualquer turno em andamento. Uma sessão nova
+  // (ex.: webhook de PR) chegando no meio de outra (ex.: conversa no Slack) derrubava a primeira. Espera os
+  // turnos ativos terminarem antes de reiniciar (com teto, para não travar a sessão nova para sempre).
+  async function waitForIdleTurns(maxMs = Number(process.env.REBOOT_WAIT_MS || 600_000)) {
+    const started = Date.now();
+    const busy = () => Array.from(activeTurns.values()).some((t) => !t.terminal && Date.now() - t.lastActivity < 120_000);
+    if (busy()) console.log("[reboot] esperando turnos em andamento terminarem…");
+    while (busy() && Date.now() - started < maxMs) await new Promise((r) => setTimeout(r, 1000));
   }
 
   // ---- health -------------------------------------------------------------

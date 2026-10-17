@@ -7,6 +7,14 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 
+// Ambiente do processo opencode (herdado pelo bash do agente): sem segredos — eles vão por {file:…}.
+const SECRET_ENV_NAMES = new Set(["LITELLM_API_KEY", "LAP_API_KEY", "PR_REVIEWER_MCP_TOKEN", "ANTHROPIC_API_KEY",
+  "OPENAI_API_KEY", "E2B_API_KEY", "DAYTONA_API_KEY", "RUNTIME_API_KEY"]);
+function agentEnv() {
+  return Object.fromEntries(Object.entries(process.env).filter(([k]) => !SECRET_ENV_NAMES.has(k)));
+}
+const AGENT_SECRETS_DIR = process.env.AGENT_SECRETS_DIR || "/run/agent-secrets";
+
 // Serialize all opencode.json reads+writes so concurrent agent registrations
 // don't clobber each other's models (last-write-wins race condition).
 let _jsonQueue = Promise.resolve();
@@ -109,7 +117,7 @@ export async function startOpencode({ port = 4096, cwd, env } = {}) {
   const proc = spawn(
     "opencode",
     ["serve", "--port", String(port), "--hostname", "0.0.0.0"],
-    { cwd, env: { ...process.env, ...env }, stdio: "inherit" }
+    { cwd, env: { ...agentEnv(), ...env }, stdio: "inherit" }
   );
 
   const stop = () => {
@@ -258,14 +266,17 @@ export function mcpServerName(serverName, agentId) {
   return `${clean(serverName)}__${clean(agentId).slice(-12)}`;
 }
 
-// MCPs remotos do LAP (ex.: o "platform", com subagentes, memória, Slack) exigem a chave do LAP. O valor
-// fica em env (LAP_API_KEY) e o opencode resolve {env:…}: a chave não é gravada no opencode.json.
+// MCPs remotos do LAP (ex.: o "platform", com subagentes, memória, Slack) exigem a chave do LAP. O valor fica
+// num arquivo (AGENT_SECRETS_DIR) e o opencode resolve {file:…}: a chave não vai para o opencode.json nem para
+// o ambiente do shell do agente. Servidores com `secret_header_file` (ex.: o pr-reviewer) usam o próprio token.
 function mcpHeaders(server) {
   const headers = { ...(server.headers || {}) };
   const authToken = server.authorization_token || server.auth_token;
-  if (authToken) headers.Authorization = `Bearer ${authToken}`;
+  const secretFile = server.secret_file || (/lap-pr-reviewer/.test(String(server.url || "")) ? "PR_REVIEWER_MCP_TOKEN" : null);
+  if (secretFile) headers.Authorization = `Bearer {file:${AGENT_SECRETS_DIR}/${secretFile}}`;
+  else if (authToken) headers.Authorization = `Bearer ${authToken}`;
   else if (!headers.Authorization && process.env.LAP_API_KEY && isLapUrl(server.url)) {
-    headers.Authorization = "Bearer {env:LAP_API_KEY}";
+    headers.Authorization = `Bearer {file:${AGENT_SECRETS_DIR}/LAP_API_KEY}`;
   }
   return headers;
 }

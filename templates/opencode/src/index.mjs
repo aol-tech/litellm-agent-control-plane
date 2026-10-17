@@ -1,6 +1,8 @@
 // Express entry: exposes opencode via the Anthropic Managed Agents API spec.
 // Boots a child `opencode serve`, persists agents durably, provisions opencode
 // per session, and translates opencode SSE -> Anthropic event shapes.
+import path from "node:path";
+import { mkdir, writeFile } from "node:fs/promises";
 import { mkdirSync } from "node:fs";
 
 import { createStore } from "./store.mjs";
@@ -47,11 +49,21 @@ const LITELLM_MODELS = (process.env.LITELLM_MODELS || "")
 // Optional: override the model opencode uses for internal calls (title generation,
 // summarization, etc.). Defaults to the first entry in LITELLM_MODELS.
 const LITELLM_DEFAULT_MODEL = process.env.LITELLM_DEFAULT_MODEL || null;
+// Segredos do runtime vão para arquivos fora do workspace e o opencode lê via {file:…}; o processo do
+// opencode (e o bash do agente, que herda o ambiente dele) sobe SEM essas variáveis. Antes um `env` no
+// shell do agente mostrava as chaves — e o agente revisa código de terceiros (prompt injection).
+const SECRETS_DIR = process.env.AGENT_SECRETS_DIR || "/run/agent-secrets";
+const SECRET_ENV = ["LITELLM_API_KEY", "LAP_API_KEY", "PR_REVIEWER_MCP_TOKEN", "ANTHROPIC_API_KEY", "OPENAI_API_KEY"];
+await mkdir(SECRETS_DIR, { recursive: true, mode: 0o700 });
+for (const name of SECRET_ENV) {
+  if (process.env[name]) await writeFile(path.join(SECRETS_DIR, name), process.env[name], { mode: 0o600 });
+}
+const secretRef = (name) => `{file:${path.join(SECRETS_DIR, name)}}`;
 if (LITELLM_BASE_URL && LITELLM_API_KEY) {
   await writeProviderConfig(WORKDIR, {
     id: LITELLM_PROVIDER_ID,
     baseURL: LITELLM_BASE_URL,
-    apiKey: LITELLM_API_KEY,
+    apiKey: secretRef("LITELLM_API_KEY"),
     models: LITELLM_MODELS,
     defaultModel: LITELLM_DEFAULT_MODEL,
   });

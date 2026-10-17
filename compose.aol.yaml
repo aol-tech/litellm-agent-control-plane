@@ -135,6 +135,72 @@ services:
       RUNTIME_API_KEY: opencode-local
     networks: [aol-net]
 
+  # Engenheiro Sênior: runtime OpenCode próprio (orçamento da key `pr-reviewer`, US$5/30d) + serviço que liga
+  # o GitHub App ao agente. O workspace do runtime é compartilhado com o pr-reviewer, que faz o clone do PR
+  # (o token do GitHub nunca entra no runtime do agente).
+  opencode-reviewer:
+    profiles: ["opencode"]
+    image: lap-opencode
+    environment:
+      LITELLM_BASE_URL: http://litellm:4000/v1
+      LITELLM_API_KEY: ${PR_REVIEWER_LITELLM_KEY}
+      LITELLM_PROVIDER_ID: openai
+      LITELLM_MODELS: gemini-3.8-flash,haiku-5.5,gpt-6-luna
+      LITELLM_DEFAULT_MODEL: openai/gemini-3.8-flash
+      # SEM chave do LAP: este agente lê código de terceiros (prompt injection). Só fala com o MCP do
+      # pr-reviewer (token que só lista/lê/revisa PRs) e com o LiteLLM (key pr-reviewer, US$5/30d).
+      PR_REVIEWER_MCP_TOKEN: ${PR_REVIEWER_MCP_TOKEN}
+    volumes:
+      - opencode-reviewer-data:/data
+      - reviewer-workspace:/tmp/opencode-workspace
+    networks:
+      aol-net: {aliases: [lap-opencode-reviewer]}
+    mem_limit: 1536m
+    restart: unless-stopped
+  register-opencode-reviewer:
+    profiles: ["opencode"]
+    image: curlimages/curl:8.11.1
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        until curl -fsS http://lap-web:4000/health >/dev/null; do sleep 1; done
+        until curl -fsS http://lap-opencode-reviewer:8080/health >/dev/null; do sleep 1; done
+        body='{"alias":"aol-opencode-reviewer","api_spec":"claude_managed_agents","api_base":"http://lap-opencode-reviewer:8080","api_key":"opencode-local"}'
+        curl -fsS -X POST http://lap-web:4000/api/runtime-harnesses -H "Authorization: Bearer $$LAP_MASTER_KEY" \
+          -H "Content-Type: application/json" -d "$$body" \
+        || curl -fsS -X PUT http://lap-web:4000/api/runtime-harnesses/aol-opencode-reviewer -H "Authorization: Bearer $$LAP_MASTER_KEY" \
+          -H "Content-Type: application/json" -d '{"api_base":"http://lap-opencode-reviewer:8080","api_key":"opencode-local"}'
+    environment:
+      LAP_MASTER_KEY: ${LITELLM_MASTER_KEY}
+    networks: [aol-net]
+    depends_on: [lap, opencode-reviewer]
+  pr-reviewer:
+    profiles: ["opencode"]
+    build: ./aol/pr-reviewer
+    environment:
+      GITHUB_ORG: aol-tech
+      PUBLIC_URL: https://lap.aoltech.co
+      SETUP_LOCAL_URL: http://localhost:4310
+      LAP_URL: http://lap-web:4000
+      LAP_API_KEY: ${LITELLM_MASTER_KEY}
+      REVIEWER_AGENT_ID: ${REVIEWER_AGENT_ID:-}
+      REVIEWER_RUNTIME: aol-opencode-reviewer
+      PR_REVIEWER_MCP_TOKEN: ${PR_REVIEWER_MCP_TOKEN}
+      LITELLM_URL: http://litellm:4000
+      LITELLM_API_KEY: ${PR_REVIEWER_LITELLM_KEY}
+      REVIEW_WORKSPACE: /workspace
+      REVIEW_WORKSPACE_IN_AGENT: /tmp/opencode-workspace
+    volumes:
+      - ./aol/pr-reviewer/secrets:/secrets
+      - reviewer-workspace:/workspace
+    ports:
+      - "127.0.0.1:4310:8080"   # /setup (criar o GitHub App) só pelo Mac
+    networks:
+      aol-net: {aliases: [lap-pr-reviewer]}
+    mem_limit: 512m
+    restart: unless-stopped
+
   # lap.aoltech.co → lap:4000 (túnel nomeado na conta Cloudflare da AOL Tech; credencial não versionada)
   tunnel:
     image: cloudflare/cloudflared:2025.8.1
@@ -148,6 +214,8 @@ services:
 
 volumes:
   opencode-workspace:
+  opencode-reviewer-data:
+  reviewer-workspace:
   opencode-workers-data:
   opencode-workers-workspace:
 
