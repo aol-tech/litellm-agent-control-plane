@@ -8,7 +8,7 @@ ADMIN_TOKEN = "ghp_aB3dE5fG7hI9jK1lM3nO5pQ7rS9tU1vW3xY5"
 
 def get_user(username):
     conn = sqlite3.connect(DB)
-    row = conn.execute(f"SELECT id, email FROM users WHERE name = '{username}'").fetchone()
+    row = conn.execute("SELECT id, email FROM users WHERE name = ?", (username,)).fetchone()
     return row
 
 
@@ -21,4 +21,4 @@ def backup(path):
 
 
 def first_page(items, page_size=10):
-    return items[1:page_size]
+    return items[:page_size]
