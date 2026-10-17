@@ -65,6 +65,35 @@ services:
       RUNTIME_API_KEY: ${HERMES_RUNTIME_API_KEY}
     networks: [aol-net]
 
+  # runtime OpenCode (harness de código/agente geral) com Gemini 3.8 Flash. O OpenCode fala o formato OpenAI
+  # (/chat/completions), que o LAP não expõe: aponta direto para o LiteLLM do aol-ops com a key `lap`
+  # (custo e traces continuam no aol-ops/Langfuse).
+  opencode:
+    profiles: ["opencode"]
+    build: ./templates/opencode
+    environment:
+      LITELLM_BASE_URL: http://litellm:4000/v1
+      LITELLM_API_KEY: ${AOL_LITELLM_KEY}
+      LITELLM_PROVIDER_ID: openai
+      LITELLM_MODELS: gemini-3.8-flash,haiku-5.5,gpt-6-luna
+      LITELLM_DEFAULT_MODEL: openai/gemini-3.8-flash
+    volumes:
+      - opencode-data:/data
+      - opencode-workspace:/tmp/opencode-workspace
+    networks:
+      aol-net: {aliases: [lap-opencode]}
+    mem_limit: 1536m
+    restart: unless-stopped
+  register-opencode:
+    environment:
+      LAP_URL: http://lap-web:4000
+      LAP_MASTER_KEY: ${LITELLM_MASTER_KEY}
+      RUNTIME_ALIAS: aol-opencode
+      RUNTIME_API_SPEC: claude_managed_agents
+      RUNTIME_API_BASE: http://lap-opencode:8080
+      RUNTIME_API_KEY: opencode-local
+    networks: [aol-net]
+
   # lap.aoltech.co → lap:4000 (túnel nomeado na conta Cloudflare da AOL Tech; credencial não versionada)
   tunnel:
     image: cloudflare/cloudflared:2025.8.1
@@ -75,6 +104,9 @@ services:
     networks: [aol-net]
     restart: unless-stopped
     mem_limit: 128m
+
+volumes:
+  opencode-workspace:
 
 networks:
   aol-net:

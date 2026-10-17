@@ -580,6 +580,17 @@ def hermes_failure_detail(session_id: str, proc: subprocess.CompletedProcess[str
     return clip(redact_error_detail(detail), 4_000)
 
 
+def has_hermes_history(session_id: str) -> bool:
+    state_path = hermes_home(session_id) / "state.db"
+    if not state_path.exists():
+        return False
+    try:
+        with sqlite3.connect(state_path) as conn:
+            return conn.execute("SELECT 1 FROM sessions LIMIT 1").fetchone() is not None
+    except sqlite3.Error:
+        return False
+
+
 def run_hermes_cli(session_id: str, prompt: str, agent_row: sqlite3.Row) -> tuple[str, bool]:
     write_hermes_context(session_id, agent_row)
     workdir = Path(HERMES_WORKDIR) / session_id
@@ -588,6 +599,9 @@ def run_hermes_cli(session_id: str, prompt: str, agent_row: sqlite3.Row) -> tupl
         HERMES_COMMAND,
         "chat",
         "--quiet",
+        # Cada sessão do LAP tem seu HERMES_HOME; a partir do 2º turno, retoma a conversa Hermes anterior.
+        # Sem isso cada mensagem virava uma sessão nova e o agente esquecia tudo o que foi dito.
+        *(["--resume", "latest"] if has_hermes_history(session_id) else []),
         "--provider",
         "custom:lap",
         "--model",

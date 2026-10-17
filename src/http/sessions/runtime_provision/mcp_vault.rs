@@ -26,6 +26,12 @@ pub(super) async fn vault_ids(
     if created.resolved.agent_runtime != AgentRuntime::ClaudeManagedAgents {
         return Ok(None);
     }
+    // Vaults são da API oficial da Anthropic. Runtimes próprios que só falam o mesmo protocolo
+    // (Hermes, OpenCode, Deep Agents…) não têm /v1/vaults: tentar criar quebrava toda sessão de um
+    // agente com ferramentas da plataforma (ex.: as do Slack) com "vault create failed 404".
+    if !is_anthropic_api(&created.resolved.credential.api_base) {
+        return Ok(None);
+    }
 
     let mut required: Vec<VaultCredential> = gateway_mcp_credentials(state, mcp_servers)
         .into_iter()
@@ -81,6 +87,13 @@ pub(super) async fn vault_ids(
     }
 
     Ok(Some(vec![vault_id]))
+}
+
+fn is_anthropic_api(api_base: &str) -> bool {
+    reqwest::Url::parse(api_base)
+        .ok()
+        .and_then(|url| url.host_str().map(|host| host == "api.anthropic.com" || host.ends_with(".anthropic.com")))
+        .unwrap_or(false)
 }
 
 async fn create_vault(
@@ -167,3 +180,17 @@ fn anthropic_v1_base(api_base: &str) -> String {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod anthropic_api_tests {
+    use super::is_anthropic_api;
+
+    #[test]
+    fn only_the_official_anthropic_api_gets_vaults() {
+        assert!(is_anthropic_api("https://api.anthropic.com"));
+        assert!(is_anthropic_api("https://api.anthropic.com/v1"));
+        assert!(!is_anthropic_api("http://lap-hermes:8080"));
+        assert!(!is_anthropic_api("http://opencode:8080"));
+        assert!(!is_anthropic_api("not a url"));
+    }
+}
