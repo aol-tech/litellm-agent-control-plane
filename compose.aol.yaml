@@ -83,6 +83,7 @@ services:
     volumes:
       - opencode-data:/data
       - opencode-workspace:/tmp/opencode-workspace
+      - opencode-state:/root/.local/share/opencode   # histórico das sessões (sobrevive a recriar o container)
     networks:
       aol-net: {aliases: [lap-opencode]}
     mem_limit: 1536m
@@ -103,6 +104,7 @@ services:
     volumes:
       - opencode-workers-data:/data
       - opencode-workers-workspace:/tmp/opencode-workspace
+      - opencode-workers-state:/root/.local/share/opencode   # histórico das sessões (sobrevive a recriar o container)
     networks:
       aol-net: {aliases: [lap-opencode-workers]}
     mem_limit: 1536m
@@ -153,6 +155,7 @@ services:
     volumes:
       - opencode-reviewer-data:/data
       - reviewer-workspace:/tmp/opencode-workspace
+      - opencode-reviewer-state:/root/.local/share/opencode   # histórico das sessões (sobrevive a recriar o container)
     networks:
       aol-net: {aliases: [lap-opencode-reviewer]}
     mem_limit: 1536m
@@ -213,6 +216,9 @@ services:
     mem_limit: 128m
 
 volumes:
+  opencode-state:
+  opencode-workers-state:
+  opencode-reviewer-state:
   opencode-workspace:
   opencode-reviewer-data:
   reviewer-workspace:

@@ -157,7 +157,9 @@ export function createApp({
   // If opencode stops emitting events mid-turn without a terminal event (its
   // idle signal varies across versions), synthesize session.status_idle after
   // this much silence so the client never hangs in "running" forever.
-  const IDLE_FALLBACK_MS = Number(process.env.TURN_IDLE_FALLBACK_MS || 30_000);
+  // 30 s encerrava turnos vivos (comando longo, chamada lenta ao modelo, subagente de minutos): o Slack recebia
+  // "fim" sem texto e a resposta real chegava solta depois. 5 min ainda cobre o caso do opencode morto.
+  const IDLE_FALLBACK_MS = Number(process.env.TURN_IDLE_FALLBACK_MS || 300_000);
   // DEBUG_EVENTS=1 logs every raw opencode event the capture loop sees -
   // verbose, but invaluable to learn the exact event shapes a given opencode
   // version emits (e.g. what its end-of-turn signal looks like).
@@ -435,6 +437,12 @@ export function createApp({
     armTurnWatchdog(req.params.id, turnId);
 
     res.status(202).json({ ok: true });
+  }));
+
+  // O opencode ainda tem esta sessão? (o LAP pergunta antes de reaproveitar uma sessão antiga numa DM)
+  app.get("/v1/sessions/:id/alive", wrap(async (req, res) => {
+    const r = await ocFetch(await ocBase(), `/session/${req.params.id}`, { method: "GET" });
+    res.status(r.ok ? 200 : 404).json({ alive: r.ok });
   }));
 
   // Interrupt the in-flight turn — proxies opencode's session abort.

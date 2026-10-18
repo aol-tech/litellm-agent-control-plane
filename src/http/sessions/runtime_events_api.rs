@@ -202,6 +202,35 @@ pub(crate) async fn runtime_event_stream_for_session(
         .map_err(agent_sdk_error)
 }
 
+/// O runtime ainda conhece a sessão? Pergunta ao próprio runtime (`GET /v1/sessions/{id}/alive`, que o template
+/// OpenCode oferece); runtimes sem essa rota são tratados como "sim", como antes.
+pub(crate) async fn runtime_session_exists(
+    state: &AppState,
+    pool: &PgPool,
+    session_id: &str,
+) -> Result<bool, GatewayError> {
+    let row = session(pool, session_id).await?;
+    let runtime = row.runtime.as_deref().ok_or_else(|| {
+        GatewayError::InvalidConfig("session is not a runtime session".to_owned())
+    })?;
+    let resolved = crate::http::runtime_resolution::resolve_runtime(pool, state, runtime).await?;
+    let url = format!(
+        "{}/v1/sessions/{}/alive",
+        resolved.credential.api_base.trim_end_matches('/'),
+        row.id
+    );
+    let response = state
+        .http
+        .get(url)
+        .header("x-api-key", &resolved.credential.api_key)
+        .send()
+        .await
+        .map_err(GatewayError::Upstream)?;
+    // Só um `{"alive": false}` explícito invalida: runtimes sem essa rota (404 genérico) seguem como antes.
+    let body: Value = response.json().await.unwrap_or(Value::Null);
+    Ok(body.get("alive").and_then(Value::as_bool) != Some(false))
+}
+
 /// Texto das mensagens do agente já gravadas no runtime para a sessão (a lista completa, não o stream).
 /// Usado quando o stream fecha antes do texto chegar: alguns runtimes emitem o idle antes das mensagens.
 pub(crate) async fn runtime_agent_message_text(

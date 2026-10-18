@@ -74,6 +74,30 @@ async fn handle_event_callback(
         spawn_dm_access_denied(state, agent, config, message);
         return Ok(());
     }
+    // DM: cada mensagem nova no Slack vira um "thread" próprio, então cada mensagem abria uma sessão nova e o
+    // agente esquecia a conversa. Fora de thread, reusa a sessão da DM usada nas últimas 24h.
+    if message.is_direct_message && !message.requires_existing_thread {
+        let since = crate::db::managed_agents::now_ms() - DM_SESSION_TTL_MS;
+        let previous =
+            slack::repository::latest_in_channel(&pool, &agent.id, &message.channel, since).await?;
+        // só reaproveita se o runtime ainda conhece a sessão (o histórico dele pode ter sido perdido)
+        let alive = match &previous {
+            Some(row) => runtime_session_alive(&state, &pool, &row.session_id).await,
+            None => false,
+        };
+        if let Some(previous) = previous.filter(|_| alive) {
+            let row = slack::repository::upsert(
+                &pool,
+                &agent.id,
+                &message.channel,
+                &message.thread_ts,
+                &previous.session_id,
+            )
+            .await?;
+            spawn_slack_prompt(state, pool, agent, config, message, row.session_id);
+            return Ok(());
+        }
+    }
     let (row, message) = match message.requires_existing_thread {
         true => {
             match slack::repository::get(&pool, &agent.id, &message.channel, &message.thread_ts)
@@ -115,6 +139,14 @@ async fn handle_event_callback(
     };
     spawn_slack_prompt(state, pool, agent, config, message, row.session_id);
     Ok(())
+}
+
+const DM_SESSION_TTL_MS: i64 = 24 * 60 * 60 * 1000;
+
+async fn runtime_session_alive(state: &Arc<AppState>, pool: &sqlx::PgPool, session_id: &str) -> bool {
+    crate::http::sessions::runtime_session_exists(state, pool, session_id)
+        .await
+        .unwrap_or(false)
 }
 
 fn spawn_dm_access_denied(

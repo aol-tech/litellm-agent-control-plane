@@ -46,6 +46,31 @@ pub async fn get(
     .map_err(GatewayError::Database)
 }
 
+/// Sessão mais recente de um canal (DM) usada desde `since_ms`: continuidade da conversa em DM, onde cada
+/// mensagem nova é um "thread" próprio no Slack.
+pub async fn latest_in_channel(
+    pool: &PgPool,
+    agent_id: &str,
+    channel_id: &str,
+    since_ms: i64,
+) -> Result<Option<SlackThreadSessionRow>, GatewayError> {
+    sqlx::query_as::<_, SlackThreadSessionRow>(
+        r#"
+        SELECT *
+        FROM "LiteLLM_ManagedAgentSlackThreadSessionsTable"
+        WHERE agent_id = $1 AND channel_id = $2 AND updated_at >= $3
+        ORDER BY updated_at DESC
+        LIMIT 1
+        "#,
+    )
+    .bind(agent_id)
+    .bind(channel_id)
+    .bind(since_ms)
+    .fetch_optional(pool)
+    .await
+    .map_err(GatewayError::Database)
+}
+
 pub async fn upsert(
     pool: &PgPool,
     agent_id: &str,
